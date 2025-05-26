@@ -44,13 +44,15 @@ jobs:
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          
+
       - name: Set IMAGE_URI for next steps
+        id: set-image
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "::set-output name=image_uri::$IMAGE_URI"
 
       - name: Fill in new image URI in task definition
         id: render-task
@@ -58,7 +60,7 @@ jobs:
         with:
           task-definition: .github/task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ env.IMAGE_URI }}
+          image: ${{ steps.set-image.outputs.image_uri }}
 
       - name: Deploy ECS task definition to ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -66,16 +68,7 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER_NAME }}
           service: ${{ env.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
-          wait-for-service-stability: true  # Add this line to wait for deployment
-
-      # Add this step to force a new deployment
-      - name: Force new deployment
-        run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER_NAME }} \
-            --service ${{ env.ECS_SERVICE_NAME }} \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
+          wait-for-service-stability: true
 
       - name: Confirm ECS task definition deployed
         run: |
@@ -85,7 +78,7 @@ jobs:
             --services ${{ env.ECS_SERVICE_NAME }} \
             --region ${{ env.AWS_REGION }} \
             --query "services[0].taskDefinition"
-          
+
           echo "Running tasks:"
           aws ecs list-tasks \
             --cluster ${{ env.ECS_CLUSTER_NAME }} \
