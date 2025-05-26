@@ -31,12 +31,18 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           echo "Building Docker image..."
+          
+          # Trim any whitespace/newlines from variables
+          ECR_REGISTRY=$(echo "$ECR_REGISTRY" | tr -d '\n\r' | xargs)
+          ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | tr -d '\n\r' | xargs)
+          IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r' | xargs)
+          
           echo "ECR Registry: $ECR_REGISTRY"
           echo "ECR Repository: $ECR_REPOSITORY"
           echo "Image Tag: $IMAGE_TAG"
           
           # Set the full image name
-          FULL_IMAGE_NAME="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
           echo "Full image name: $FULL_IMAGE_NAME"
           
           # Build the image
