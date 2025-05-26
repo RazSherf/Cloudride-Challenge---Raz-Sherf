@@ -22,3 +22,8 @@ variable "aws_region" {
   description = "AWS region to deploy resources in"
   default     = "us-east-1"
 }
+
+variable "ecr_image_url" {
+  description = "image = 753392824297.dkr.ecr.us-east-1.amazonaws.com/hello-world-repo:hello-world-buildx"
+  type        = string
+}
