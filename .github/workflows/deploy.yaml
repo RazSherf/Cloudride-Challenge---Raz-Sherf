@@ -56,9 +56,13 @@ jobs:
 
       - name: Replace placeholders in task definition
         run: |
-          sed -i "s|REPLACE_REGION|${{ env.AWS_REGION }}|g" .github/task-definition.json
-          sed -i "s|REPLACE_EXECUTION_ROLE_ARN|${{ secrets.ECS_EXECUTION_ROLE_ARN }}|g" .github/task-definition.json
-          sed -i "s|REPLACE_TASK_ROLE_ARN|${{ secrets.ECS_TASK_ROLE_ARN }}|g" .github/task-definition.json
+          REGION="${{ env.AWS_REGION }}"
+          EXEC_ROLE="${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
+          TASK_ROLE="${{ secrets.ECS_TASK_ROLE_ARN }}"
+
+          sed -i "s|REPLACE_REGION|$REGION|g" .github/task-definition.json
+          sed -i "s|REPLACE_EXECUTION_ROLE_ARN|$EXEC_ROLE|g" .github/task-definition.json
+          sed -i "s|REPLACE_TASK_ROLE_ARN|$TASK_ROLE|g" .github/task-definition.json
 
       - name: Fill in new image URI in task definition
         id: render-task
