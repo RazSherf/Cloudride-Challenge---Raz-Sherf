@@ -54,6 +54,12 @@ jobs:
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
           echo "::set-output name=image_uri::$IMAGE_URI"
 
+      - name: Replace placeholders in task definition
+        run: |
+          sed -i "s|REPLACE_REGION|${{ env.AWS_REGION }}|g" .github/task-definition.json
+          sed -i "s|REPLACE_EXECUTION_ROLE_ARN|${{ secrets.ECS_EXECUTION_ROLE_ARN }}|g" .github/task-definition.json
+          sed -i "s|REPLACE_TASK_ROLE_ARN|${{ secrets.ECS_TASK_ROLE_ARN }}|g" .github/task-definition.json
+
       - name: Fill in new image URI in task definition
         id: render-task
         uses: aws-actions/amazon-ecs-render-task-definition@v1
