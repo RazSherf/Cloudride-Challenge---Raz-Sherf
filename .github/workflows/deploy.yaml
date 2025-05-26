@@ -31,14 +31,25 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push Docker image to ECR
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image to ECR
+        uses: docker/build-push-action@v5
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Set IMAGE_URI for next steps
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
-          echo "Building Docker image: $IMAGE_URI"
-          docker build -t "$IMAGE_URI" .
-          docker push "$IMAGE_URI"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       - name: Fill in new image URI in task definition
