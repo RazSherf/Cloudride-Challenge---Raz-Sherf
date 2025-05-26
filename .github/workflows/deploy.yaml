@@ -40,6 +40,15 @@ jobs:
           echo "ECR Registry: $ECR_REGISTRY"
           echo "ECR Repository: $ECR_REPOSITORY"
           echo "Image Tag: $IMAGE_TAG"
+          echo "AWS Region: ${{ secrets.AWS_REGION }}"
+          
+          # Check if repository exists
+          echo "Checking if ECR repository exists..."
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region ${{ secrets.AWS_REGION }} || echo "Repository check failed"
+          
+          # List all repositories for debugging
+          echo "Available ECR repositories:"
+          aws ecr describe-repositories --region ${{ secrets.AWS_REGION }} --query 'repositories[].repositoryName' --output table
           
           # Set the full image name
           FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
