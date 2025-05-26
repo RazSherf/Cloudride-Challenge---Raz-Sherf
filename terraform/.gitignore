@@ -1,5 +1,9 @@
-.terraform/
+# Ignore Terraform state files
 *.tfstate
 *.tfstate.backup
-*.tfvars
+
+# Ignore Terraform provider plugins and working directory
+.terraform/
+
+# Ignore lock file (optional for teams, but usually excluded)
 .terraform.lock.hcl
