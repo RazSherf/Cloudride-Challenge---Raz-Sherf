@@ -13,11 +13,27 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
+# IAM Role for ECS Task
+resource "aws_iam_role" "ecs_task_role" {
+  name = "ecsTaskRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
 # ECS Task Definition
 resource "aws_ecs_task_definition" "hello_world" {
   family                   = "hello-world-task"
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn            = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn    # שימו לב לשינוי כאן
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = 256
