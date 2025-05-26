@@ -55,6 +55,16 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER_NAME }}
           service: ${{ env.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
+          wait-for-service-stability: true  # Add this line to wait for deployment
+
+      # Add this step to force a new deployment
+      - name: Force new deployment
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER_NAME }} \
+            --service ${{ env.ECS_SERVICE_NAME }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
 
       - name: Confirm ECS task definition deployed
         run: |
@@ -64,3 +74,9 @@ jobs:
             --services ${{ env.ECS_SERVICE_NAME }} \
             --region ${{ env.AWS_REGION }} \
             --query "services[0].taskDefinition"
+          
+          echo "Running tasks:"
+          aws ecs list-tasks \
+            --cluster ${{ env.ECS_CLUSTER_NAME }} \
+            --service-name ${{ env.ECS_SERVICE_NAME }} \
+            --region ${{ env.AWS_REGION }}
