@@ -69,18 +69,45 @@ jobs:
           service: ${{ env.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
           wait-for-service-stability: true
+          wait-for-minutes: 10
 
-      - name: Confirm ECS task definition deployed
+      - name: Check service status
         run: |
-          echo "Deployed task definition:"
+          echo "Checking service status..."
           aws ecs describe-services \
             --cluster ${{ env.ECS_CLUSTER_NAME }} \
             --services ${{ env.ECS_SERVICE_NAME }} \
             --region ${{ env.AWS_REGION }} \
-            --query "services[0].taskDefinition"
+            --query "services[0].{status:status,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount,events:events[0:5]}"
 
-          echo "Running tasks:"
-          aws ecs list-tasks \
+      - name: Check task status
+        run: |
+          echo "Checking task status..."
+          TASK_ARNS=$(aws ecs list-tasks \
             --cluster ${{ env.ECS_CLUSTER_NAME }} \
             --service-name ${{ env.ECS_SERVICE_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "taskArns" \
+            --output text)
+          
+          if [ ! -z "$TASK_ARNS" ]; then
+            aws ecs describe-tasks \
+              --cluster ${{ env.ECS_CLUSTER_NAME }} \
+              --tasks $TASK_ARNS \
+              --region ${{ env.AWS_REGION }} \
+              --query "tasks[].{lastStatus:lastStatus,stoppedReason:stoppedReason,containers:containers[].{name:name,lastStatus:lastStatus,reason:reason}}"
+          else
+            echo "No tasks found"
+          fi
+
+      - name: Check target group health
+        run: |
+          echo "Checking target group health..."
+          aws elbv2 describe-target-health \
+            --target-group-arn $(aws ecs describe-services \
+              --cluster ${{ env.ECS_CLUSTER_NAME }} \
+              --services ${{ env.ECS_SERVICE_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --query "services[0].loadBalancers[0].targetGroupArn" \
+              --output text) \
             --region ${{ env.AWS_REGION }}
