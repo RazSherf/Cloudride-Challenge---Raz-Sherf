@@ -52,17 +52,16 @@ jobs:
         run: |
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
-          echo "::set-output name=image_uri::$IMAGE_URI"
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
       - name: Replace placeholders in task definition
         run: |
-          REGION="${{ env.AWS_REGION }}"
-          EXEC_ROLE="${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
-          TASK_ROLE="${{ secrets.ECS_TASK_ROLE_ARN }}"
-
-          sed -i "s|REPLACE_REGION|$REGION|g" .github/task-definition.json
-          sed -i "s|REPLACE_EXECUTION_ROLE_ARN|$EXEC_ROLE|g" .github/task-definition.json
-          sed -i "s|REPLACE_TASK_ROLE_ARN|$TASK_ROLE|g" .github/task-definition.json
+          export REPLACE_REGION="${{ env.AWS_REGION }}"
+          export REPLACE_EXECUTION_ROLE_ARN="${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
+          export REPLACE_TASK_ROLE_ARN="${{ secrets.ECS_TASK_ROLE_ARN }}"
+          
+          envsubst < .github/task-definition.json > .github/task-definition-processed.json
+          mv .github/task-definition-processed.json .github/task-definition.json
 
       - name: Fill in new image URI in task definition
         id: render-task
@@ -79,7 +78,7 @@ jobs:
           service: ${{ env.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
           wait-for-service-stability: true
-          wait-for-minutes: 10
+          wait-for-minutes: 1
 
       - name: Check service status
         run: |
@@ -113,11 +112,17 @@ jobs:
       - name: Check target group health
         run: |
           echo "Checking target group health..."
-          aws elbv2 describe-target-health \
-            --target-group-arn $(aws ecs describe-services \
-              --cluster ${{ env.ECS_CLUSTER_NAME }} \
-              --services ${{ env.ECS_SERVICE_NAME }} \
-              --region ${{ env.AWS_REGION }} \
-              --query "services[0].loadBalancers[0].targetGroupArn" \
-              --output text) \
-            --region ${{ env.AWS_REGION }}
+          TARGET_GROUP_ARN=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER_NAME }} \
+            --services ${{ env.ECS_SERVICE_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "services[0].loadBalancers[0].targetGroupArn" \
+            --output text)
+          
+          if [ "$TARGET_GROUP_ARN" != "None" ] && [ ! -z "$TARGET_GROUP_ARN" ]; then
+            aws elbv2 describe-target-health \
+              --target-group-arn $TARGET_GROUP_ARN \
+              --region ${{ env.AWS_REGION }}
+          else
+            echo "No target group found or service not using load balancer"
+          fi
