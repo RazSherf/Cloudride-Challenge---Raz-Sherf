@@ -42,19 +42,15 @@ jobs:
           echo "Image Tag: $IMAGE_TAG"
           echo "AWS Region: ${{ secrets.AWS_REGION }}"
           
-          # Check if repository exists
           echo "Checking if ECR repository exists..."
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region ${{ secrets.AWS_REGION }} || echo "Repository check failed"
           
-          # List all repositories for debugging
           echo "Available ECR repositories:"
           aws ecr describe-repositories --region ${{ secrets.AWS_REGION }} --query 'repositories[].repositoryName' --output table
           
-          # Set the full image name
           FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
           echo "Full image name: $FULL_IMAGE_NAME"
           
-          # Build the image
           docker build -t "$FULL_IMAGE_NAME" .
           
           echo "Pushing image to ECR..."
@@ -68,9 +64,17 @@ jobs:
           container-name: ${{ secrets.CONTAINER_NAME }}
           image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy to ECS
+      - name: Deploy to ECS (Update service with new task definition)
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           cluster: ${{ secrets.ECS_CLUSTER_NAME }}
           service: ${{ secrets.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
+
+      - name: Force new deployment to ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+            --service ${{ secrets.ECS_SERVICE_NAME }} \
+            --force-new-deployment \
+            --region ${{ secrets.AWS_REGION }}
