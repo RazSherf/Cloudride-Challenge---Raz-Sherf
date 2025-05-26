@@ -9,8 +9,15 @@ jobs:
     name: Build and Deploy to Amazon ECS
     runs-on: ubuntu-latest
 
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
+      ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
+      CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -18,63 +25,42 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push image to ECR
+      - name: Build, tag, and push Docker image to ECR
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Building Docker image..."
-          
-          # Trim any whitespace/newlines from variables
-          ECR_REGISTRY=$(echo "$ECR_REGISTRY" | tr -d '\n\r' | xargs)
-          ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | tr -d '\n\r' | xargs)
-          IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r' | xargs)
-          
-          echo "ECR Registry: $ECR_REGISTRY"
-          echo "ECR Repository: $ECR_REPOSITORY"
-          echo "Image Tag: $IMAGE_TAG"
-          echo "AWS Region: ${{ secrets.AWS_REGION }}"
-          
-          echo "Checking if ECR repository exists..."
-          aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region ${{ secrets.AWS_REGION }} || echo "Repository check failed"
-          
-          echo "Available ECR repositories:"
-          aws ecr describe-repositories --region ${{ secrets.AWS_REGION }} --query 'repositories[].repositoryName' --output table
-          
-          FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          echo "Full image name: $FULL_IMAGE_NAME"
-          
-          docker build -t "$FULL_IMAGE_NAME" .
-          
-          echo "Pushing image to ECR..."
-          docker push "$FULL_IMAGE_NAME"
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          echo "Building Docker image: $IMAGE_URI"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-      - name: Fill in the new image ID in the ECS task definition
+      - name: Fill in new image URI in task definition
         id: render-task
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: .github/task-definition.json
-          container-name: ${{ secrets.CONTAINER_NAME }}
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE_URI }}
 
-      - name: Deploy to ECS (Update service with new task definition)
+      - name: Deploy ECS task definition to ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
-          service: ${{ secrets.ECS_SERVICE_NAME }}
+          cluster: ${{ env.ECS_CLUSTER_NAME }}
+          service: ${{ env.ECS_SERVICE_NAME }}
           task-definition: ${{ steps.render-task.outputs.task-definition }}
 
-      - name: Force new deployment to ECS service
+      - name: Confirm ECS task definition deployed
         run: |
-          aws ecs update-service \
-            --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
-            --service ${{ secrets.ECS_SERVICE_NAME }} \
-            --force-new-deployment \
-            --region ${{ secrets.AWS_REGION }}
+          echo "Deployed task definition:"
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER_NAME }} \
+            --services ${{ env.ECS_SERVICE_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "services[0].taskDefinition"
