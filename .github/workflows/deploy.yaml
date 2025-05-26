@@ -29,22 +29,21 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
-          DOCKER_BUILDKIT: 0
         run: |
           echo "Building Docker image..."
           echo "ECR Registry: $ECR_REGISTRY"
           echo "ECR Repository: $ECR_REPOSITORY"
           echo "Image Tag: $IMAGE_TAG"
           
-          # Disable buildx and use legacy builder
-          docker buildx use default || true
-          export DOCKER_CLI_EXPERIMENTAL=disabled
+          # Set the full image name
+          FULL_IMAGE_NAME="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "Full image name: $FULL_IMAGE_NAME"
           
           # Build the image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -t "$FULL_IMAGE_NAME" .
           
           echo "Pushing image to ECR..."
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push "$FULL_IMAGE_NAME"
 
       - name: Fill in the new image ID in the ECS task definition
         id: render-task
