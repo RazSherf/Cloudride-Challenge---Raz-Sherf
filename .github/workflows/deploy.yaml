@@ -1,128 +1,89 @@
-name: Deploy Hello World App to ECS
+name: Deploy to ECS
 
 on:
   push:
-    branches: [ main ]
+    branches: [ fixing ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE_NAME }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_NAME }}
+  ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION }}
+  CONTAINER_NAME: hello-world
 
 jobs:
   deploy:
-    name: Build and Deploy to Amazon ECS
+    name: Deploy to ECS
     runs-on: ubuntu-latest
-
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-      ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
-      ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
-      CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+    environment: production
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Show root directory and verify task-definition.json presence
+      run: |
+        echo "Current working directory: $(pwd)"
+        echo "Listing files in current directory:"
+        ls -la
+        echo "Checking if task-definition.json exists:"
+        if [[ -f "task-definition.json" ]]; then
+          echo "✅ task-definition.json found!"
+        else
+          echo "❌ task-definition.json is missing!"
+          exit 1
+        fi
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image to ECR
-        uses: docker/build-push-action@v5
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Set IMAGE_URI for next steps
-        id: set-image
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
-          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+    - name: Debug and Replace placeholders in task definition
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        echo "Replacing placeholders in task-definition.json..."
+        sed -i "s|REPLACE_IMAGE|$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" task-definition.json
+        sed -i "s|REPLACE_REGION|$AWS_REGION|g" task-definition.json
+        sed -i "s|REPLACE_EXECUTION_ROLE_ARN|${{ secrets.ECS_EXECUTION_ROLE_ARN }}|g" task-definition.json
+        sed -i "s|REPLACE_TASK_ROLE_ARN|${{ secrets.ECS_TASK_ROLE_ARN }}|g" task-definition.json
 
-      - name: Replace placeholders in task definition
-        run: |
-          export REPLACE_REGION="${{ env.AWS_REGION }}"
-          export REPLACE_EXECUTION_ROLE_ARN="${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
-          export REPLACE_TASK_ROLE_ARN="${{ secrets.ECS_TASK_ROLE_ARN }}"
-          
-          envsubst < .github/task-definition.json > .github/task-definition-processed.json
-          mv .github/task-definition-processed.json .github/task-definition.json
+        echo "Updated task-definition.json:"
+        cat task-definition.json
 
-      - name: Fill in new image URI in task definition
-        id: render-task
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: .github/task-definition.json
-          container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.set-image.outputs.image_uri }}
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: hello-world
+        image: ${{ steps.build-image.outputs.image }}
 
-      - name: Deploy ECS task definition to ECS service
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          cluster: ${{ env.ECS_CLUSTER_NAME }}
-          service: ${{ env.ECS_SERVICE_NAME }}
-          task-definition: ${{ steps.render-task.outputs.task-definition }}
-          wait-for-service-stability: true
-          wait-for-minutes: 1
-
-      - name: Check service status
-        run: |
-          echo "Checking service status..."
-          aws ecs describe-services \
-            --cluster ${{ env.ECS_CLUSTER_NAME }} \
-            --services ${{ env.ECS_SERVICE_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query "services[0].{status:status,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount,events:events[0:5]}"
-
-      - name: Check task status
-        run: |
-          echo "Checking task status..."
-          TASK_ARNS=$(aws ecs list-tasks \
-            --cluster ${{ env.ECS_CLUSTER_NAME }} \
-            --service-name ${{ env.ECS_SERVICE_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query "taskArns" \
-            --output text)
-          
-          if [ ! -z "$TASK_ARNS" ]; then
-            aws ecs describe-tasks \
-              --cluster ${{ env.ECS_CLUSTER_NAME }} \
-              --tasks $TASK_ARNS \
-              --region ${{ env.AWS_REGION }} \
-              --query "tasks[].{lastStatus:lastStatus,stoppedReason:stoppedReason,containers:containers[].{name:name,lastStatus:lastStatus,reason:reason}}"
-          else
-            echo "No tasks found"
-          fi
-
-      - name: Check target group health
-        run: |
-          echo "Checking target group health..."
-          TARGET_GROUP_ARN=$(aws ecs describe-services \
-            --cluster ${{ env.ECS_CLUSTER_NAME }} \
-            --services ${{ env.ECS_SERVICE_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query "services[0].loadBalancers[0].targetGroupArn" \
-            --output text)
-          
-          if [ "$TARGET_GROUP_ARN" != "None" ] && [ ! -z "$TARGET_GROUP_ARN" ]; then
-            aws elbv2 describe-target-health \
-              --target-group-arn $TARGET_GROUP_ARN \
-              --region ${{ env.AWS_REGION }}
-          else
-            echo "No target group found or service not using load balancer"
-          fi
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
